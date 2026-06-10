@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1 — 2026-06-10
+
+- Use the full user guide as the PyPI/README landing page.
+
 ## 1.0.0 — 2026-06-10
 
 Initial release.

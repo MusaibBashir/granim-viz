@@ -29,7 +29,7 @@ from .structures.matrix import Matrix
 from .structures.tracked import Tracked
 from .structures.tree import Tree, TreeNode
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __all__ = [
     "animate", "record", "array", "matrix", "linked_list", "tree", "graph",
     "node", "container", "index", "GranimError", "ListNode", "TreeNode",
