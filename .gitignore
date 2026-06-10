@@ -1,0 +1,33 @@
+# byte-code / caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+#Personal docs
+mydocs/
+# virtual environments
+.venv/
+venv/
+env/
+
+# generated animations (examples re-generate them; don't commit output)
+examples/*.html
+*.html
+!src/granim/render/player/template.html
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# local scratch
+*.log
+.coverage

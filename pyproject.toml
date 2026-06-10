@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "granim-viz"
+version = "1.0.0"
+description = "Write the algorithm, get the animation. Instrumented data structures that compile your real Python code into interactive HTML visualizations. Built for educational purposes"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Musaib Bashir", email = "musaibbashir.24@kgpian.iitkgp.ac.in" }]
+keywords = [
+    "visualization", "animation", "algorithms", "data-structures",
+    "education", "linked-list", "graph", "tree", "manim", "teaching",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Education",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Software Development :: Debuggers",
+]
+
+[project.urls]
+Homepage = "https://github.com/musaibbashir/granim-viz"
+Repository = "https://github.com/musaibbashir/granim-viz"
+Issues = "https://github.com/musaibbashir/granim-viz/issues"
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"granim.render" = ["player/*"]
+
+[tool.ruff]
+line-length = 100

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}} · granim</title>
+<style>{{CSS}}</style>
+</head>
+<body>
+<div id="app">
+  <header><h1>{{TITLE}}</h1><span id="steplabel"></span></header>
+  <main>
+    <div id="stage"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+    <aside id="panel">
+      <h3>variables</h3>
+      <table id="vars"></table>
+      <h3>call stack</h3>
+      <div id="stack"></div>
+    </aside>
+  </main>
+  <footer>
+    <button id="prevbtn" title="step back (←)">⏴</button>
+    <button id="playbtn" title="play/pause (space)">▶</button>
+    <button id="nextbtn" title="step forward (→)">⏵</button>
+    <input type="range" id="scrub" min="0" value="0">
+    <select id="speed">
+      <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option><option value="2">2×</option>
+      <option value="4">4×</option>
+    </select>
+    <span id="counter"></span>
+  </footer>
+</div>
+<script type="application/json" id="granim-data">{{DATA}}</script>
+<script>{{JS}}</script>
+</body>
+</html>
