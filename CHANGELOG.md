@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 — 2026-06-11
+
+- Execution trace panel (left side, `debug=True`): narrates every step —
+  the source line being executed, comparisons with outcomes, pointer moves
+  and flips, value/state changes, variable updates, loop-iteration and
+  call/return markers. Click any entry to jump to that step.
+- Timeline now carries the traced source lines and per-step changed
+  variables.
+
 ## 1.0.1 — 2026-06-10
 
 - Use the full user guide as the PyPI/README landing page.

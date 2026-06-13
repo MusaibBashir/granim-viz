@@ -1,13 +1,24 @@
-"""Dijkstra — weighted edges show their weights; nodes turn frontier when
-queued, visited when popped, done when finalized. Distances live in the panel."""
+"""Dijkstra — a weighted road network with tempting shortcuts and cheaper
+multi-hop alternatives. Nodes turn frontier when queued, visited when popped,
+done when finalized. Distances live in the panel."""
 import heapq
 
 import granim as ga
 
 g = ga.graph(directed=False)
-A, B, C, D, E, F = (g.add_node(x) for x in "ABCDEF")
-for u, v, w in [(A, B, 4), (A, C, 2), (B, C, 1), (B, D, 5),
-                (C, D, 8), (C, E, 10), (D, E, 2), (D, F, 6), (E, F, 3)]:
+S, A, B, C, D, E, F, G, T = (g.add_node(x) for x in "SABCDEFGT")
+
+roads = [
+    (S, A, 4), (S, B, 2), (S, C, 9),
+    (A, B, 1), (A, D, 5), (A, E, 12),
+    (B, C, 3), (B, D, 8),
+    (C, E, 4),
+    (D, E, 2), (D, F, 6),
+    (E, F, 1), (F, G, 3), (G, T, 2),
+    (E, T, 8),
+]
+
+for u, v, w in roads:
     g.add_edge(u, v, weight=w)
 
 
@@ -34,4 +45,4 @@ def dijkstra(start):
 
 
 if __name__ == "__main__":
-    print(dijkstra(A))
+    print(dijkstra(S))

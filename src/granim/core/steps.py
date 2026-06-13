@@ -16,6 +16,7 @@ class Step:
     vars: list[Event]
     stack: list[dict]
     mut_sig: frozenset = field(default=frozenset())
+    via: list = field(default_factory=list)  # silent lines executed before this step
 
 
 class StepBuilder:
@@ -24,22 +25,43 @@ class StepBuilder:
         self._snapshot = stack_snapshot
         self._pending: list[Event] = []
         self._line: int | None = None
+        self._line_emitted = False
         self._depth = 0
         self._carry_vars: list[Event] = []
+        self._carry_lines: list[int] = []
         self._batch = 0
 
     def add(self, e: Event) -> None:
+        if e.kind != "var_set":
+            self._line_emitted = True
         self._pending.append(e)
 
-    def boundary(self, line: int | None = None, depth: int = 0, label: str | None = None) -> None:
-        """Flush on line change, call/return, or explicit rec.step()."""
+    def boundary(self, line: int | None = None, depth: int = 0,
+                 label: str | None = None, mode: str = "flush") -> None:
+        """Flush pending events. Carry semantics by mode:
+        "line"  - a new line starts: carry the previous line if it ran silently;
+        "call"  - a call leaves the current line: carry it now (before the
+                  callee's steps) and mark it accounted for;
+        "flush" - return / explicit step(): flush only, the line did not re-run.
+        """
         if self._batch:
             return
-        if self._pending:
+        if self._pending or label:
             self._flush(label)
-        elif label:  # explicit empty step() forces a titled beat on next flush
-            self._flush(label)
-        self._line, self._depth = line, depth
+        if mode == "line":
+            if self._line is not None and not self._line_emitted:
+                self._carry_lines.append(self._line)
+                del self._carry_lines[:-8]
+            self._line_emitted = False
+            self._line = line
+        elif mode == "call":
+            if self._line is not None and not self._line_emitted:
+                self._carry_lines.append(self._line)
+                del self._carry_lines[:-8]
+                self._line_emitted = True
+        elif line is not None:
+            self._line = line
+        self._depth = depth
 
     def begin_batch(self) -> None:
         if not self._batch and self._pending:
@@ -54,12 +76,16 @@ class StepBuilder:
     def finish(self) -> list[Step]:
         if self._pending:
             self._flush(None)
+        if self._line is not None and not self._line_emitted:
+            self._carry_lines.append(self._line)  # trailing silent line
         if self.steps:  # trailing step so the final state renders
             self.steps.append(Step(
                 i=len(self.steps), line=None, depth=0, label=None,
                 ops=[], vars=self._carry_vars, stack=self._snapshot(),
+                via=self._carry_lines,
             ))
             self._carry_vars = []
+            self._carry_lines = []
         return self.steps
 
     # -- internals -----------------------------------------------------------
@@ -85,13 +111,17 @@ class StepBuilder:
             and last.mut_sig == mut
         ):
             last.ops += ops
+            last.via += self._carry_lines
+            self._carry_lines = []
             _merge_vars(last.vars, var_evts)
             return
 
         self.steps.append(Step(
             i=len(self.steps), line=self._line, depth=self._depth, label=label,
             ops=ops, vars=var_evts, stack=self._snapshot(), mut_sig=mut,
+            via=self._carry_lines,
         ))
+        self._carry_lines = []
 
 
 def _merge_vars(into: list[Event], new: list[Event]) -> None:

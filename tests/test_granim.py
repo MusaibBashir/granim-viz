@@ -521,3 +521,79 @@ def test_vars_die_with_their_frame():
     last_step = tl["steps"][-1]["i"]
     assert steps_with_probe and max(steps_with_probe) < last_step, \
         "helper's local must vanish from the panel after helper returns"
+
+
+# -- execution trace data --------------------------------------------------------
+
+def test_timeline_carries_source_and_changes():
+    def walk(head):
+        cur = head
+        while cur is not None:
+            cur = cur.next
+        return True
+
+    tl, _ = compile_of(walk, ga.linked_list([1, 2]).head, debug=True)
+    src = tl["meta"]["src"]
+    assert src, "traced source lines must ship in meta.src"
+    assert any("cur = cur.next" in line for line in src.values())
+    assert any("while cur is not None" in line for line in src.values()), \
+        "silent condition lines must ship via the `via` path"
+    via_lines = [l for s in tl["steps"] for l in s.get("via", [])]
+    assert via_lines, "silent lines between beats must be recorded"
+    changed = [n for s in tl["steps"] for n in s.get("chg", [])]
+    assert "cur" in changed
+
+
+def test_via_lines_appear_once_per_execution():
+    def rev(node):
+        if node is None or node.next is None:
+            return node
+        new_head = rev(node.next)
+        node.next.next = node
+        node.next = None
+        return new_head
+
+    tl, _ = compile_of(rev, ga.linked_list([1, 2, 3, 4, 5]).head, debug=True)
+    src = tl["meta"]["src"]
+    ret_line = next(int(l) for l, t in src.items() if "return new_head" in t)
+    count = sum(s.get("via", []).count(ret_line) for s in tl["steps"])
+    assert count == 4, f"'return new_head' runs 4 times for 5 nodes, traced {count}"
+    base_line = next(int(l) for l, t in src.items() if "return node" in t)
+    count = sum(s.get("via", []).count(base_line) for s in tl["steps"])
+    assert count == 1, f"base-case return runs once, traced {count}"
+
+
+def test_struct_groups_never_overlap():
+    # a graph that grows across keyframes must push the matrix out of its way
+    g = ga.graph(directed=True)
+    m = ga.matrix([[0] * 4, [0] * 4])
+
+    def grow(g, m):
+        prev = g.add_node("n0")
+        for i in range(1, 7):
+            cur = g.add_node(f"n{i}")
+            g.add_edge(prev, cur)
+            m[i % 2][i % 4] = i
+            prev = cur
+        return prev
+
+    tl, _ = compile_of(grow, g, m)
+    groups = {}
+    for nid, meta in tl["nodes"].items():
+        groups.setdefault(meta["struct"], set()).add(nid)
+    (ga_ids, mb_ids) = [v for k, v in sorted(groups.items())]
+    for kf in tl["keyframes"]:
+        boxes = []
+        for ids in (ga_ids, mb_ids):
+            pts = [kf["pos"][n] for n in ids if n in kf["pos"]]
+            if not pts:
+                boxes.append(None)
+                continue
+            xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+            boxes.append((min(xs), min(ys), max(xs), max(ys)))
+        a, b = boxes
+        if a and b:
+            x_overlap = a[0] <= b[2] and a[2] >= b[0]
+            y_overlap = a[1] < b[3] - 0.1 and a[3] > b[1] + 0.1
+            assert not (x_overlap and y_overlap), \
+                f"kf@step{kf['step']}: graph box {a} intersects matrix box {b}"

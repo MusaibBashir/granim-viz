@@ -21,14 +21,49 @@ function kfPos(kf, id) {
   for (let i = kf + 1; i < KF.length; i++) if (KF[i][id]) return KF[i][id];
   return [PAD, PAD];
 }
-(function setViewBox() {
-  let xs = [PAD], ys = [PAD];
+/* ---------- camera: fit / wheel zoom / drag pan ---------- */
+let vb = { x: 0, y: 0, w: 100, h: 100 };
+function applyVB() {
+  svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+}
+function fit() {
+  let xs = [], ys = [];
   for (const kf of KF) for (const [x, y] of Object.values(kf)) { xs.push(x); ys.push(y); }
-  const w = Math.max(...xs) + PAD, h = Math.max(...ys) + PAD;
-  const headroom = 36;  // room for badges above/below the drawing
-  svg.setAttribute("viewBox", `0 ${-headroom} ${w} ${h + headroom * 2}`);
-  svg.style.width = w + "px";
+  if (!xs.length) { xs = [0]; ys = [0]; }
+  const M = U * 1.7;  // margin for node bodies, labels and badges
+  const x0 = Math.min(...xs) - M, y0 = Math.min(...ys) - M;
+  vb = { x: x0, y: y0, w: Math.max(...xs) - x0 + M, h: Math.max(...ys) - y0 + M };
+  applyVB();
+}
+(function camera() {
+  svg.addEventListener("wheel", e => {
+    e.preventDefault();
+    const k = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+    const r = svg.getBoundingClientRect();
+    const px = vb.x + (e.clientX - r.left) / r.width * vb.w;
+    const py = vb.y + (e.clientY - r.top) / r.height * vb.h;
+    vb = { x: px - (px - vb.x) * k, y: py - (py - vb.y) * k, w: vb.w * k, h: vb.h * k };
+    applyVB();
+  }, { passive: false });
+  let drag = null;
+  svg.addEventListener("pointerdown", e => {
+    drag = { cx: e.clientX, cy: e.clientY, x: vb.x, y: vb.y };
+    svg.setPointerCapture(e.pointerId);
+    svg.classList.add("panning");
+  });
+  svg.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const r = svg.getBoundingClientRect();
+    vb.x = drag.x - (e.clientX - drag.cx) * vb.w / r.width;
+    vb.y = drag.y - (e.clientY - drag.cy) * vb.h / r.height;
+    applyVB();
+  });
+  const end = () => { drag = null; svg.classList.remove("panning"); };
+  svg.addEventListener("pointerup", end);
+  svg.addEventListener("pointercancel", end);
+  svg.addEventListener("dblclick", fit);
 })();
+fit();
 
 /* ---------- per-step world states (seek + back-step) ---------- */
 const STATES = (() => {
@@ -358,7 +393,90 @@ const IC = {
   pause: '<svg viewBox="0 0 24 24"><path d="M7 5h3.4v14H7zm6.6 0H17v14h-3.4z"/></svg>'
 };
 function setPlay(on) { $("playbtn").innerHTML = on ? IC.pause : IC.play; }
+const SRC = (DATA.meta && DATA.meta.src) || {};
+function nodeLabel(id) {
+  return (DATA.nodes[id] && DATA.nodes[id].label) || id;
+}
+function traceFacts(st, prev) {
+  const f = [];
+  const top = st.stack[st.stack.length - 1];
+  const ptop = prev && prev.stack[prev.stack.length - 1];
+  if (st.stack.length > (prev ? prev.stack.length : 0) && top)
+    f.push(["call", "\u2192 " + top.fn + top.args]);
+  if (prev && st.stack.length < prev.stack.length && ptop)
+    f.push(["call", "\u2190 return from " + ptop.fn]);
+  if (prev && top && ptop && top.fid === ptop.fid
+      && st.line != null && prev.line != null && st.line < prev.line)
+    f.push(["loop", "\u21bb next iteration"]);
+  for (const op of st.ops) {
+    if (op.op === "compare")
+      f.push(["cmp", `${op.a_repr} ${op.sym} ${op.b_repr} \u2192 ${op.result}`]);
+    else if (op.op === "value_set")
+      f.push(["mut", `${op.old} \u2192 ${op.new}`]);
+    else if (op.op === "edge_flip")
+      f.push(["mut", `${nodeLabel(op.src)} ${op.slot} \u21c4 ${nodeLabel(op.dst)}`]);
+    else if (op.op === "edge_set")
+      f.push(["mut", `${nodeLabel(op.src)}.${op.slot} \u2192 ${nodeLabel(op.dst)}`]);
+    else if (op.op === "edge_unset")
+      f.push(["mut", `${nodeLabel(op.src)}.${op.slot} \u2192 \u2205`]);
+    else if (op.op === "node_add")
+      f.push(["mut", `+ ${op.label}`]);
+    else if (op.op === "node_remove")
+      f.push(["mut", `\u2212 ${nodeLabel(op.id)}`]);
+    else if (op.op === "state_set" && op.state !== "default")
+      f.push(["state", `${nodeLabel(op.id)} \u2192 ${op.state}`]);
+    else if (op.op === "badge_set")
+      f.push(["mut", `${op.slot} \u2192 ${op.dst ? nodeLabel(op.dst) : "\u2205"}`]);
+  }
+  for (const name of st.chg || []) {
+    const v = st.vars.find(x => x.name === name);
+    if (v) f.push(["var", `${name} = ${v.repr}`]);
+  }
+  return f;
+}
+function buildTrace() {
+  const list = $("tracelist");
+  DATA.steps.forEach((st, i) => {
+    const e = document.createElement("div");
+    e.className = "tentry";
+    e.id = "t" + i;
+    for (const vl of st.via || []) {
+      const v = document.createElement("div");
+      v.className = "tvia";
+      v.textContent = SRC[vl] ? SRC[vl].trim() : "line " + vl;
+      e.appendChild(v);
+    }
+    const head = document.createElement("div");
+    head.className = "thead";
+    head.textContent = st.label ? st.label
+      : (st.line && SRC[st.line] ? SRC[st.line].trim()
+         : (st.line ? "line " + st.line
+            : (i === 0 ? "initial state" : "\u2014 end \u2014")));
+    e.appendChild(head);
+    for (const [cls, text] of traceFacts(st, i ? DATA.steps[i - 1] : null)) {
+      const li = document.createElement("div");
+      li.className = "tfact " + cls;
+      li.textContent = text;
+      e.appendChild(li);
+    }
+    e.onclick = () => { pause(); renderState(i); };
+    list.appendChild(e);
+  });
+}
+let traceActive = -1;
+function markTrace(i) {
+  if (i === traceActive) return;
+  const old = document.getElementById("t" + traceActive);
+  if (old) old.classList.remove("active");
+  const cur = document.getElementById("t" + i);
+  if (cur) {
+    cur.classList.add("active");
+    cur.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+  traceActive = i;
+}
 function updatePanel(st) {
+  markTrace(st.i);
   $("counter").textContent = `${st.i + 1} / ${DATA.steps.length}`;
   $("steplabel").textContent =
     (st.label ? st.label + " · " : "") + (st.line ? "line " + st.line : "");
@@ -413,6 +531,9 @@ async function play() {
 function pause() { playing = false; token++; setPlay(false); }
 
 function bind() {
+  $("fitbtn").innerHTML =
+    '<svg viewBox="0 0 24 24"><path d="M4 9V4h5v2H6v3H4zm16 0h-2V6h-3V4h5v5zM4 15h2v3h3v2H4v-5zm14 3v-3h2v5h-5v-2h3z"/></svg>';
+  $("fitbtn").onclick = fit;
   $("prevbtn").innerHTML = IC.prev;
   $("nextbtn").innerHTML = IC.next;
   setPlay(false);
@@ -430,12 +551,14 @@ function bind() {
     if (e.key === " ") { e.preventDefault(); play(); }
     else if (e.key === "ArrowRight") $("nextbtn").onclick();
     else if (e.key === "ArrowLeft") $("prevbtn").onclick();
+    else if (e.key === "f") fit();
     else if (e.key === "Home") { pause(); renderState(0); }
     else if (e.key === "End") { pause(); renderState(DATA.steps.length - 1); }
   });
 }
 
 bind();
+buildTrace();
 if (!DATA.meta.debug) document.body.classList.add("nodebug");
 if (DATA.meta.error) $("steplabel").classList.add("err");
 renderState(0);

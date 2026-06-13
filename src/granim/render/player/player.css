@@ -29,8 +29,9 @@ header h1::before {
 
 /* stage — the page IS the canvas; drawing dead-centred both axes */
 main { display: flex; gap: 18px; flex: 1; min-height: 0; }
-#stage { flex: 1; display: flex; overflow: auto; }
-#svg { margin: auto; max-width: 100%; height: auto; display: block; }
+#stage { flex: 1; overflow: hidden; }
+#svg { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+#svg.panning { cursor: grabbing; }
 
 /* nodes — flat manim look: bright stroke, translucent colored fill, no shadows */
 .node .shape {
@@ -148,4 +149,50 @@ footer button:active { transform: scale(0.92); }
 @media (max-width: 760px) {
   main { flex-direction: column; }
   #panel { width: 100%; }
+}
+
+/* execution trace */
+#trace {
+  width: 270px; min-width: 190px; max-width: 520px;
+  resize: horizontal; overflow: auto;
+  border-radius: 14px; padding: 14px 10px 14px 14px;
+  background: var(--glass); border: 1px solid var(--hairline);
+  backdrop-filter: blur(6px); align-self: stretch;
+  max-height: calc(100vh - 180px);
+}
+#trace h3 {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 1.8px;
+  color: var(--state-visited); margin: 0 0 8px;
+}
+.tentry {
+  padding: 5px 8px; margin-bottom: 2px; border-radius: 8px; cursor: pointer;
+  border-left: 2px solid transparent; opacity: 0.55;
+}
+.tentry:hover { background: rgba(255, 255, 255, 0.05); opacity: 0.9; }
+.tentry.active {
+  background: rgba(255, 255, 255, 0.06); opacity: 1;
+  border-left-color: var(--state-active);
+}
+.thead {
+  font-family: ui-monospace, monospace; font-size: 11px;
+  white-space: pre-wrap; word-break: break-word;
+}
+.tfact {
+  font-family: ui-monospace, monospace; font-size: 10.5px; padding: 1px 0 0 12px;
+  white-space: pre-wrap; word-break: break-word; opacity: 0.85;
+}
+.tfact.cmp   { color: var(--state-active); }
+.tfact.mut   { color: var(--state-visited); }
+.tfact.var   { color: var(--node-text); }
+.tfact.state { color: var(--state-frontier); }
+.tfact.loop, .tfact.call { color: var(--state-done); }
+body.nodebug #trace { display: none; }
+
+@media (max-width: 1100px) {
+  #trace { display: none; }
+}
+.tvia {
+  font-family: ui-monospace, monospace; font-size: 10.5px;
+  white-space: pre-wrap; word-break: break-word;
+  opacity: 0.45; padding-bottom: 1px;
 }

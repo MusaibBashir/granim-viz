@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import functools
+import linecache
 import sys
 import webbrowser
 from pathlib import Path
@@ -29,7 +30,7 @@ from .structures.matrix import Matrix
 from .structures.tracked import Tracked
 from .structures.tree import Tree, TreeNode
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 __all__ = [
     "animate", "record", "array", "matrix", "linked_list", "tree", "graph",
     "node", "container", "index", "GranimError", "ListNode", "TreeNode",
@@ -63,6 +64,7 @@ def animate(fn=None, *, debug=False, theme="dark", out=None, show=None,
 
         rec = Recorder(debug=debug, theme=theme, title=title or fn.__name__,
                        speed=speed, owner=wrapper)
+        rec.src_lines = linecache.getlines(fn.__code__.co_filename)
         from .structures.base import is_node
         rec.ext_roots = [a._id for a in (*args, *kwargs.values()) if is_node(a)]
         result, err = None, None

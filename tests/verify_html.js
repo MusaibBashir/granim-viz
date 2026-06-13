@@ -67,6 +67,16 @@ for (const f of ["reverse_recursive.html", "reverse_iterative.html"]) {
   check("bfs: parallel frontier step", parallel);
 }
 
+// dijkstra: rich weighted network with enough alternate routes to show updates
+{
+  const data = load(path.join(dir, "dijkstra.html"));
+  const { nodes, edges } = simulate(data);
+  const labels = new Set([...nodes.values()].map(n => String(n.label).replace(/^'|'$/g, "")));
+  check("dijkstra: 9 labelled nodes", "SABCDEFGT".split("").every(x => labels.has(x)));
+  check("dijkstra: 15 weighted edges", [...edges.values()].filter(e => e.w !== undefined).length === 15);
+  check("dijkstra: all nodes finalized", [...nodes.values()].every(n => n.state === "done"));
+}
+
 // bst: 9 nodes, 8 child edges
 {
   const data = load(path.join(dir, "build_bst.html"));

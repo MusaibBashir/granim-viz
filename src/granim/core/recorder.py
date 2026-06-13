@@ -140,7 +140,7 @@ class Recorder:
     # -- trace hooks (core/trace.py calls these) ----------------------------------
 
     def on_call(self, frame) -> None:
-        self.sb.boundary(self._cur_line(), max(len(self._stack) - 1, 0))
+        self.sb.boundary(self._cur_line(), max(len(self._stack) - 1, 0), mode="call")
         self._frame_serial += 1
         code = frame.f_code
         args = ", ".join(
@@ -158,7 +158,7 @@ class Recorder:
         # locals are always diffed; debug only controls display
         self._diff_locals(frame)
         self._stack[-1]["line"] = frame.f_lineno
-        self.sb.boundary(frame.f_lineno, max(len(self._stack) - 1, 0))
+        self.sb.boundary(frame.f_lineno, max(len(self._stack) - 1, 0), mode="line")
 
     def on_return(self, frame) -> None:
         self._diff_locals(frame)

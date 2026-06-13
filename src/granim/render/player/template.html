@@ -10,6 +10,10 @@
 <div id="app">
   <header><h1>{{TITLE}}</h1><span id="steplabel"></span></header>
   <main>
+    <aside id="trace">
+      <h3>execution</h3>
+      <div id="tracelist"></div>
+    </aside>
     <div id="stage"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
     <aside id="panel">
       <h3>variables</h3>
@@ -19,6 +23,7 @@
     </aside>
   </main>
   <footer>
+    <button id="fitbtn" title="fit to view (f / double-click)"></button>
     <button id="prevbtn" title="step back (←)">⏴</button>
     <button id="playbtn" title="play/pause (space)">▶</button>
     <button id="nextbtn" title="step forward (→)">⏵</button>

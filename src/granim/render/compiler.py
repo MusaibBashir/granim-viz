@@ -73,10 +73,13 @@ def compile_timeline(rec) -> dict:
             elif e.kind == "state_set":
                 ops.append({"op": "state_set", "id": p["id"], "state": p["state"]})
 
+        changed = []
         for e in step.vars:
             v = dict(e.payload)
             v["fid"] = e.frame
-            var_state[v.pop("name")] = v
+            name = v.pop("name")
+            changed.append(name)
+            var_state[name] = v
         # variables expire with their stack frame (fid 0 persists)
         live_fids = {f.get("fid", 0) for f in step.stack}
         var_state = {k: v for k, v in var_state.items()
@@ -107,6 +110,8 @@ def compile_timeline(rec) -> dict:
         out_steps.append({
             "i": step.i, "line": step.line, "depth": step.depth,
             "label": step.label, "kf": len(keyframes) - 1, "ops": ops,
+            "chg": changed,
+            "via": list(step.via),
             "vars": [{"name": k, **{kk: vv for kk, vv in v.items() if kk != "fid"}}
                      for k, v in var_state.items()],
             "stack": step.stack,
@@ -117,10 +122,16 @@ def compile_timeline(rec) -> dict:
     if rec.error and out_steps:
         out_steps[-1]["label"] = rec.error
 
+    src_lines = getattr(rec, "src_lines", None) or []
+    used = {s["line"] for s in out_steps if s["line"]}
+    used |= {l for s in out_steps for l in s["via"]}
+    src = {str(l): src_lines[l - 1].rstrip()[:90]
+           for l in used if 0 < l <= len(src_lines)}
+
     return {
         "granim": "1",
         "meta": {"title": rec.title or "granim", "debug": rec.debug,
-                 "speed": rec.speed, "error": rec.error},
+                 "speed": rec.speed, "error": rec.error, "src": src},
         "theme": resolve_theme(rec.theme),
         "nodes": nodes,
         "structs": {sid: {"type": t, **{k: v for k, v in struct_meta[sid].items()
