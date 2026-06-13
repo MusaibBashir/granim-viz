@@ -19,9 +19,10 @@ class GraphNode(NodeBase):
 class Graph(Struct):
     type_name = "graph"
 
-    def __init__(self, directed: bool = True):
+    def __init__(self, directed: bool = True, title: str | None = None):
         super().__init__()
         self.directed = directed
+        self.title = title
         self._nodes: list[GraphNode] = []
         self._adj: dict[str, list[GraphNode]] = {}
         self._edges: dict[tuple[str, str], object] = {}

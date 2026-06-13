@@ -12,7 +12,8 @@ LIST_SLOTS = ("next", "prev", "head")
 def compile_timeline(rec) -> dict:
     nodes: dict[str, dict] = {}
     struct_types = {s._id: s.type_name for s in rec.structs}
-    struct_meta = {s._id: {"cols": getattr(s, "cols", None)} for s in rec.structs}
+    struct_meta = {s._id: {"cols": getattr(s, "cols", None),
+                           "title": getattr(s, "title", None)} for s in rec.structs}
     members: dict[str, list[str]] = {sid: [] for sid in struct_types}
     slots: dict[tuple[str, str], str] = {}       # (src, slot) -> dst, non-graph
     gedges: dict[str, set] = {sid: set() for sid in struct_types}  # graph edges
@@ -72,6 +73,8 @@ def compile_timeline(rec) -> dict:
                             "new": p["new"]})
             elif e.kind == "state_set":
                 ops.append({"op": "state_set", "id": p["id"], "state": p["state"]})
+            elif e.kind == "note":
+                ops.append({"op": "note", "text": p["text"]})
 
         changed = []
         for e in step.vars:
@@ -127,11 +130,12 @@ def compile_timeline(rec) -> dict:
     used |= {l for s in out_steps for l in s["via"]}
     src = {str(l): src_lines[l - 1].rstrip()[:90]
            for l in used if 0 < l <= len(src_lines)}
+    code = _code_block(src_lines, used, getattr(rec, "func_first_line", None))
 
     return {
         "granim": "1",
         "meta": {"title": rec.title or "granim", "debug": rec.debug,
-                 "speed": rec.speed, "error": rec.error, "src": src},
+                 "speed": rec.speed, "error": rec.error, "src": src, "code": code},
         "theme": resolve_theme(rec.theme),
         "nodes": nodes,
         "structs": {sid: {"type": t, **{k: v for k, v in struct_meta[sid].items()
@@ -206,6 +210,17 @@ def _edge_ops(step_i, p, nodes, struct_types, slots, gedges,
         alive[(src, new, cls)] = key
 
     return ops
+
+
+def _code_block(src_lines, used, first_line) -> list:
+    """The contiguous source span to show in the player: from the function's
+    def line (or first executed line) down to the last line that ever ran."""
+    used = {l for l in used if 0 < l <= len(src_lines)}
+    if not used:
+        return []
+    start = first_line if first_line and 0 < first_line <= min(used) else min(used)
+    end = max(used)
+    return [[l, src_lines[l - 1].rstrip("\n")[:200]] for l in range(start, end + 1)]
 
 
 def _ekey(src, slot, dst) -> str:

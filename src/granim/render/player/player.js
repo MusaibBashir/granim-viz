@@ -9,6 +9,7 @@ const U = +T["--unit"], R = U * 0.38, PAD = 60;
 const NS = "http://www.w3.org/2000/svg";
 const svg = document.getElementById("svg");
 let speed = DATA.meta.speed || 1;
+const manualPos = new Map();  // nodes the user has dragged stay where they're dropped
 
 /* ---------- positions ---------- */
 const KF = DATA.keyframes.map(k => {
@@ -17,6 +18,8 @@ const KF = DATA.keyframes.map(k => {
   return pos;
 });
 function kfPos(kf, id) {
+  const m = manualPos.get(id);
+  if (m) return m;  // a dragged node ignores layout keyframes and stays put
   for (let i = Math.min(kf, KF.length - 1); i >= 0; i--) if (KF[i][id]) return KF[i][id];
   for (let i = kf + 1; i < KF.length; i++) if (KF[i][id]) return KF[i][id];
   return [PAD, PAD];
@@ -30,11 +33,17 @@ function fit() {
   let xs = [], ys = [];
   for (const kf of KF) for (const [x, y] of Object.values(kf)) { xs.push(x); ys.push(y); }
   if (!xs.length) { xs = [0]; ys = [0]; }
-  const M = U * 1.7;  // margin for node bodies, labels and badges
+  const M = U * 2.0;  // margin for node bodies, labels, badges and struct titles
   const x0 = Math.min(...xs) - M, y0 = Math.min(...ys) - M;
   vb = { x: x0, y: y0, w: Math.max(...xs) - x0 + M, h: Math.max(...ys) - y0 + M };
   applyVB();
 }
+function clientToSvg(e) {
+  const r = svg.getBoundingClientRect();
+  return [vb.x + (e.clientX - r.left) / r.width * vb.w,
+          vb.y + (e.clientY - r.top) / r.height * vb.h];
+}
+let nodeDrag = null;
 (function camera() {
   svg.addEventListener("wheel", e => {
     e.preventDefault();
@@ -47,28 +56,63 @@ function fit() {
   }, { passive: false });
   let drag = null;
   svg.addEventListener("pointerdown", e => {
-    drag = { cx: e.clientX, cy: e.clientY, x: vb.x, y: vb.y };
+    const ng = e.target.closest && e.target.closest(".node");
+    if (ng) {                                   // grab a node — edges follow it
+      const id = ng.getAttribute("data-id");
+      const [mx, my] = clientToSvg(e);
+      const [nx, ny] = curPos.get(id) || [mx, my];
+      nodeDrag = { id, dx: nx - mx, dy: ny - my };
+      ng.classList.add("dragging");
+    } else {                                    // empty canvas — pan
+      drag = { cx: e.clientX, cy: e.clientY, x: vb.x, y: vb.y };
+      svg.classList.add("panning");
+    }
     svg.setPointerCapture(e.pointerId);
-    svg.classList.add("panning");
   });
   svg.addEventListener("pointermove", e => {
+    if (nodeDrag) {
+      const [mx, my] = clientToSvg(e);
+      const x = mx + nodeDrag.dx, y = my + nodeDrag.dy;
+      manualPos.set(nodeDrag.id, [x, y]);
+      setPos(nodeDrag.id, x, y);
+      repathEdges(); updateTitles();
+      return;
+    }
     if (!drag) return;
     const r = svg.getBoundingClientRect();
     vb.x = drag.x - (e.clientX - drag.cx) * vb.w / r.width;
     vb.y = drag.y - (e.clientY - drag.cy) * vb.h / r.height;
     applyVB();
   });
-  const end = () => { drag = null; svg.classList.remove("panning"); };
+  const end = () => {
+    if (nodeDrag) {
+      const n = nodeEls.get(nodeDrag.id);
+      if (n) n.g.classList.remove("dragging");
+      nodeDrag = null;
+    }
+    drag = null; svg.classList.remove("panning");
+  };
   svg.addEventListener("pointerup", end);
   svg.addEventListener("pointercancel", end);
-  svg.addEventListener("dblclick", fit);
+  svg.addEventListener("dblclick", e => {       // dbl-click a node releases it back to layout
+    const ng = e.target.closest && e.target.closest(".node");
+    if (ng) {
+      const id = ng.getAttribute("data-id");
+      manualPos.delete(id);
+      const [tx, ty] = kfPos(shownKf, id);
+      setPos(id, tx, ty); repathEdges(); updateTitles();
+      e.stopPropagation();
+      return;
+    }
+    fit();
+  });
 })();
 fit();
 
 /* ---------- per-step world states (seek + back-step) ---------- */
 const STATES = (() => {
   const states = [];
-  let nodes = new Map(), edges = new Map(), badges = new Map();
+  let nodes = new Map(), edges = new Map(), badges = new Map(), note = null;
   for (const st of DATA.steps) {
     nodes = new Map([...nodes].map(([k, v]) => [k, { ...v }]));
     edges = new Map(edges); badges = new Map(badges);
@@ -81,8 +125,9 @@ const STATES = (() => {
       else if (op.op === "badge_set") { op.dst ? badges.set(op.slot, op.dst) : badges.delete(op.slot); }
       else if (op.op === "value_set") { const n = nodes.get(op.id); if (n) n.label = op.new; }
       else if (op.op === "state_set") { const n = nodes.get(op.id); if (n) n.state = op.state; }
+      else if (op.op === "note") note = op.text || null;
     }
-    states.push({ nodes, edges, badges, kf: st.kf });
+    states.push({ nodes, edges, badges, note, kf: st.kf });
   }
   return states;
 })();
@@ -123,22 +168,31 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const D = ms => ms / speed;
 
 /* ---------- nodes ---------- */
+function fitLabel(textEl, avail) {
+  // scale text down to fit the shape's inner width; never below a legible floor
+  textEl.style.fontSize = "17px";
+  const w = textEl.getComputedTextLength();
+  if (w > avail) textEl.style.fontSize = Math.max(9, 17 * avail / w).toFixed(1) + "px";
+}
 function makeNode(id, pos, label, state) {
   const meta = DATA.nodes[id] || {};
-  const g = el("g", { class: "node", "data-state": state || "default" }, gNodes);
-  let shape;
+  const g = el("g", { class: "node", "data-state": state || "default", "data-id": id }, gNodes);
+  let shape, avail;
   if (meta.shape === "cell") {
     shape = el("rect", { x: -U * 0.5, y: -U * 0.5, width: U, height: U, rx: +T["--radius"] }, g);
+    avail = U * 0.84;
   } else if (meta.shape === "pill") {
     const pw = Math.max(R * 2.5, String(label).length * 8.5 + 16);
     shape = el("rect", { x: -pw / 2, y: -R, width: pw, height: R * 2, rx: R }, g);
+    avail = pw - 14;
   } else {
     shape = el("circle", { r: R }, g);
+    avail = R * 1.7;
   }
   shape.classList.add("shape");
   const text = el("text", { class: "nlabel", "text-anchor": "middle", dy: "0.35em" }, g);
   text.textContent = label;
-  if (String(label).length > 3) text.style.fontSize = "12px";
+  fitLabel(text, avail);
   g.setAttribute("transform", `translate(${pos[0]},${pos[1]})`);
   nodeEls.set(id, { g, shape, text });
   curPos.set(id, [...pos]);
@@ -148,6 +202,23 @@ function setPos(id, x, y) {
   const n = nodeEls.get(id);
   if (n) n.g.setAttribute("transform", `translate(${x},${y})`);
   curPos.set(id, [x, y]);
+}
+
+/* ---------- structure titles (ga.graph(title=...) / @node(graph="name")) ---------- */
+const structTitles = {};
+for (const [sid, s] of Object.entries(DATA.structs || {})) if (s.title) structTitles[sid] = s.title;
+const titleEls = new Map();
+function updateTitles() {
+  for (const [sid, title] of Object.entries(structTitles)) {
+    const ids = (structMembers[sid] || []).filter(id => curPos.has(id));
+    let t = titleEls.get(sid);
+    if (!ids.length) { if (t) { t.remove(); titleEls.delete(sid); } continue; }
+    let minx = Infinity, miny = Infinity, maxx = -Infinity;
+    for (const id of ids) { const [x, y] = curPos.get(id); minx = Math.min(minx, x); maxx = Math.max(maxx, x); miny = Math.min(miny, y); }
+    if (!t) { t = el("text", { class: "stitle", "text-anchor": "middle" }, gOver); t.textContent = title; titleEls.set(sid, t); }
+    t.setAttribute("x", (minx + maxx) / 2);
+    t.setAttribute("y", miny - R - 20);
+  }
 }
 
 /* ---------- edges ---------- */
@@ -227,6 +298,7 @@ const PRIM = {
     n.g.classList.add("enter");
     n.g.getBoundingClientRect();
     n.g.classList.remove("enter");
+    updateTitles();
     await sleep(D(450));
   },
   async node_remove(op) {
@@ -235,6 +307,7 @@ const PRIM = {
     n.g.classList.add("exit");
     await sleep(D(350));
     n.g.remove(); nodeEls.delete(op.id);
+    updateTitles();
   },
   async edge_set(op) {
     const e = makeEdge(op.key, op.src, op.dst, op.slot, op.w);
@@ -295,7 +368,18 @@ const PRIM = {
     placeStructBadge(op.slot, op.dst, true);
     await sleep(D(300));
   },
+  async note(op) {
+    setCaption(op.text);
+    await sleep(D(250));
+  },
 };
+
+/* ---------- caption (ga.note) ---------- */
+const captionEl = document.getElementById("caption");
+function setCaption(text) {
+  captionEl.textContent = text || "";
+  captionEl.classList.toggle("show", !!text);
+}
 
 /* ---------- badges (head/root + debug var refs/indices) ---------- */
 function badge(name, cls) {
@@ -372,15 +456,15 @@ async function moveToKf(kf, animate) {
     const [fx, fy] = curPos.get(id);
     if (fx !== tx || fy !== ty) moves.push([id, fx, fy, tx, ty]);
   }
-  if (!moves.length) return;
+  if (!moves.length) { updateTitles(); return; }
   if (!animate) {
     for (const [id, , , tx, ty] of moves) setPos(id, tx, ty);
-    repathEdges();
+    repathEdges(); updateTitles();
     return;
   }
   await tween(D(500), p => {
     for (const [id, fx, fy, tx, ty] of moves) setPos(id, fx + (tx - fx) * p, fy + (ty - fy) * p);
-    repathEdges();
+    repathEdges(); updateTitles();
   });
 }
 
@@ -393,40 +477,45 @@ const IC = {
   pause: '<svg viewBox="0 0 24 24"><path d="M7 5h3.4v14H7zm6.6 0H17v14h-3.4z"/></svg>'
 };
 function setPlay(on) { $("playbtn").innerHTML = on ? IC.pause : IC.play; }
-const SRC = (DATA.meta && DATA.meta.src) || {};
 function nodeLabel(id) {
-  return (DATA.nodes[id] && DATA.nodes[id].label) || id;
+  const live = STATES[idx] && STATES[idx].nodes.get(id);
+  return (live && live.label) || (DATA.nodes[id] && DATA.nodes[id].label) || id;
 }
+function esc(s) { return String(s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+/* per-step changes shown under the code (the "what just happened" feed) */
 function traceFacts(st, prev) {
   const f = [];
   const top = st.stack[st.stack.length - 1];
   const ptop = prev && prev.stack[prev.stack.length - 1];
   if (st.stack.length > (prev ? prev.stack.length : 0) && top)
-    f.push(["call", "\u2192 " + top.fn + top.args]);
+    f.push(["call", "→ " + top.fn + top.args]);
   if (prev && st.stack.length < prev.stack.length && ptop)
-    f.push(["call", "\u2190 return from " + ptop.fn]);
+    f.push(["call", "← return from " + ptop.fn]);
   if (prev && top && ptop && top.fid === ptop.fid
       && st.line != null && prev.line != null && st.line < prev.line)
-    f.push(["loop", "\u21bb next iteration"]);
+    f.push(["loop", "↻ next iteration"]);
   for (const op of st.ops) {
     if (op.op === "compare")
-      f.push(["cmp", `${op.a_repr} ${op.sym} ${op.b_repr} \u2192 ${op.result}`]);
+      f.push(["cmp", `${op.a_repr} ${op.sym} ${op.b_repr} → ${op.result}`]);
     else if (op.op === "value_set")
-      f.push(["mut", `${op.old} \u2192 ${op.new}`]);
+      f.push(["mut", `${op.old} → ${op.new}`]);
     else if (op.op === "edge_flip")
-      f.push(["mut", `${nodeLabel(op.src)} ${op.slot} \u21c4 ${nodeLabel(op.dst)}`]);
+      f.push(["mut", `${nodeLabel(op.src)} ${op.slot} ⇄ ${nodeLabel(op.dst)}`]);
     else if (op.op === "edge_set")
-      f.push(["mut", `${nodeLabel(op.src)}.${op.slot} \u2192 ${nodeLabel(op.dst)}`]);
+      f.push(["mut", `${nodeLabel(op.src)}.${op.slot} → ${nodeLabel(op.dst)}`]);
     else if (op.op === "edge_unset")
-      f.push(["mut", `${nodeLabel(op.src)}.${op.slot} \u2192 \u2205`]);
+      f.push(["mut", `${nodeLabel(op.src)}.${op.slot} → ∅`]);
     else if (op.op === "node_add")
       f.push(["mut", `+ ${op.label}`]);
     else if (op.op === "node_remove")
-      f.push(["mut", `\u2212 ${nodeLabel(op.id)}`]);
+      f.push(["mut", `− ${nodeLabel(op.id)}`]);
     else if (op.op === "state_set" && op.state !== "default")
-      f.push(["state", `${nodeLabel(op.id)} \u2192 ${op.state}`]);
+      f.push(["state", `${nodeLabel(op.id)} → ${op.state}`]);
     else if (op.op === "badge_set")
-      f.push(["mut", `${op.slot} \u2192 ${op.dst ? nodeLabel(op.dst) : "\u2205"}`]);
+      f.push(["mut", `${op.slot} → ${op.dst ? nodeLabel(op.dst) : "∅"}`]);
+    else if (op.op === "note" && op.text)
+      f.push(["note", op.text]);
   }
   for (const name of st.chg || []) {
     const v = st.vars.find(x => x.name === name);
@@ -434,62 +523,66 @@ function traceFacts(st, prev) {
   }
   return f;
 }
-function buildTrace() {
-  const list = $("tracelist");
-  DATA.steps.forEach((st, i) => {
-    const e = document.createElement("div");
-    e.className = "tentry";
-    e.id = "t" + i;
-    for (const vl of st.via || []) {
-      const v = document.createElement("div");
-      v.className = "tvia";
-      v.textContent = SRC[vl] ? SRC[vl].trim() : "line " + vl;
-      e.appendChild(v);
-    }
-    const head = document.createElement("div");
-    head.className = "thead";
-    head.textContent = st.label ? st.label
-      : (st.line && SRC[st.line] ? SRC[st.line].trim()
-         : (st.line ? "line " + st.line
-            : (i === 0 ? "initial state" : "\u2014 end \u2014")));
-    e.appendChild(head);
-    for (const [cls, text] of traceFacts(st, i ? DATA.steps[i - 1] : null)) {
-      const li = document.createElement("div");
-      li.className = "tfact " + cls;
-      li.textContent = text;
-      e.appendChild(li);
-    }
-    e.onclick = () => { pause(); renderState(i); };
-    list.appendChild(e);
-  });
+
+/* the left pane: the function source, line numbers, current line highlighted */
+function buildCode() {
+  const code = (DATA.meta && DATA.meta.code) || [];
+  const host = $("code");
+  if (!code.length) { host.innerHTML = '<div class="cline dim">source unavailable</div>'; return; }
+  host.innerHTML = code.map(([ln, text]) =>
+    `<div class="cline" id="L${ln}"><span class="ln">${ln}</span><span class="lt">${esc(text) || " "}</span></div>`
+  ).join("");
 }
-let traceActive = -1;
-function markTrace(i) {
-  if (i === traceActive) return;
-  const old = document.getElementById("t" + traceActive);
-  if (old) old.classList.remove("active");
-  const cur = document.getElementById("t" + i);
-  if (cur) {
-    cur.classList.add("active");
-    cur.scrollIntoView({ block: "nearest", behavior: "smooth" });
+let litLines = [];
+function highlightStep(st) {
+  for (const e of litLines) e.classList.remove("active", "via");
+  litLines = [];
+  for (const v of st.via || []) {
+    const e = $("L" + v);
+    if (e) { e.classList.add("via"); litLines.push(e); }
   }
-  traceActive = i;
+  const cur = st.line != null ? $("L" + st.line) : null;
+  if (cur) {
+    cur.classList.add("active"); litLines.push(cur);
+    cur.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
 }
+
 function updatePanel(st) {
-  markTrace(st.i);
   $("counter").textContent = `${st.i + 1} / ${DATA.steps.length}`;
   $("steplabel").textContent =
     (st.label ? st.label + " · " : "") + (st.line ? "line " + st.line : "");
   $("scrub").value = st.i;
+
+  highlightStep(st);
+  const facts = traceFacts(st, st.i ? DATA.steps[st.i - 1] : null);
+  $("changes").innerHTML = facts.length
+    ? facts.map(([cls, text]) => `<div class="fact ${cls}">${esc(text)}</div>`).join("")
+    : '<div class="fact dim">no change</div>';
+
   if (!DATA.meta.debug) return;
-  $("vars").innerHTML = st.vars.map(v =>
+
+  const vars = st.vars || [];
+  const refs = vars.filter(v => v.kind !== "index");
+  const iters = vars.filter(v => v.kind === "index");
+  $("vars").innerHTML = refs.map(v =>
     `<tr class="k-${v.kind}"><td class="vn">${esc(v.name)}</td><td class="vv">${esc(v.repr)}</td></tr>`).join("")
     || '<tr><td class="dim">—</td></tr>';
+  $("iters").innerHTML = iters.map(v =>
+    `<div class="iter">${esc(v.name)} = ${esc(v.repr)}</div>`).join("")
+    || '<div class="iter dim">—</div>';
+
+  const live = STATES[st.i].nodes;
+  const states = [];
+  for (const [id, n] of live) if (n.state && n.state !== "default") states.push([n.label, n.state]);
+  $("states").innerHTML = states.length
+    ? states.map(([label, s]) => `<div class="nstate s-${s}"><span class="dot"></span>${esc(label)} <span class="sn">${s}</span></div>`).join("")
+    : '<div class="nstate dim">—</div>';
+
   $("stack").innerHTML = [...st.stack].reverse().map((f, i) =>
     `<div class="frame${i === 0 ? " top" : ""}">${esc(f.fn)}${esc(f.args)}</div>`).join("")
     || '<div class="frame dim">—</div>';
 }
-function esc(s) { return String(s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
 
 /* ---------- step engine ---------- */
 let idx = -1, playing = false, token = 0;
@@ -501,18 +594,21 @@ async function animateStep(i) {
   await moveToKf(st.kf, true);
   await Promise.all(st.ops.map(op => (PRIM[op.op] || (async () => {}))(op, st)));
   updateVarBadges(st.vars, true);
+  updateTitles();
 }
 
 function renderState(i) {
   idx = i;
   const s = STATES[i], st = DATA.steps[i];
   gNodes.innerHTML = ""; gEdges.innerHTML = ""; gOver.innerHTML = "";
-  nodeEls.clear(); edgeEls.clear(); badgeEls.clear(); curPos.clear();
+  nodeEls.clear(); edgeEls.clear(); badgeEls.clear(); curPos.clear(); titleEls.clear();
   shownKf = s.kf;
   for (const [id, n] of s.nodes) makeNode(id, kfPos(s.kf, id), n.label, n.state);
   for (const [key, e] of s.edges) makeEdge(key, e.src, e.dst, e.slot, e.w);
   for (const [slot, dst] of s.badges) placeStructBadge(slot, dst, false);
+  setCaption(s.note);
   updateVarBadges(st.vars, false);
+  updateTitles();
   updatePanel(st);
 }
 
@@ -552,13 +648,14 @@ function bind() {
     else if (e.key === "ArrowRight") $("nextbtn").onclick();
     else if (e.key === "ArrowLeft") $("prevbtn").onclick();
     else if (e.key === "f") fit();
+    else if (e.key === "r") { manualPos.clear(); renderState(idx); }  // release all dragged nodes
     else if (e.key === "Home") { pause(); renderState(0); }
     else if (e.key === "End") { pause(); renderState(DATA.steps.length - 1); }
   });
 }
 
 bind();
-buildTrace();
+buildCode();
 if (!DATA.meta.debug) document.body.classList.add("nodebug");
 if (DATA.meta.error) $("steplabel").classList.add("err");
 renderState(0);

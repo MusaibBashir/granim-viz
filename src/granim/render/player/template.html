@@ -10,14 +10,24 @@
 <div id="app">
   <header><h1>{{TITLE}}</h1><span id="steplabel"></span></header>
   <main>
-    <aside id="trace">
-      <h3>execution</h3>
-      <div id="tracelist"></div>
-    </aside>
-    <div id="stage"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
-    <aside id="panel">
+    <div id="leftcol">
+      <aside id="sourcepane">
+        <h3>source</h3>
+        <div id="code"></div>
+      </aside>
+      <aside id="steppane">
+        <h3>this step</h3>
+        <div id="changes"></div>
+      </aside>
+    </div>
+    <div id="stage"><div id="caption"></div><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+    <aside id="statepane">
       <h3>variables</h3>
       <table id="vars"></table>
+      <h3>iterators</h3>
+      <div id="iters"></div>
+      <h3>node states</h3>
+      <div id="states"></div>
       <h3>call stack</h3>
       <div id="stack"></div>
     </aside>

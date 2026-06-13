@@ -4,7 +4,8 @@ granim turns the algorithm you already wrote into an interactive animation. You
 write normal Python against granim's data structures (or your own classes,
 decorated); running the function produces a single self-contained HTML file
 with a player: nodes appear, arrows flip, cells change color, variables hop
-between nodes, and you can scrub through every step.
+between nodes, the line of source you're on stays highlighted, and you can
+drag nodes apart and scrub through every step.
 
 ```
 pip install granim-viz
@@ -141,7 +142,7 @@ insert(t, [50, 30, 70, 20, 40, 60, 80])
 Tidy-tree layout (Buchheim) re-flows as nodes attach. `left`/`right` are sugar
 over a children list; `node.add_child(c)` for n-ary trees.
 
-### `ga.graph(directed=True)`
+### `ga.graph(directed=True, title=None)`
 
 ```python
 g = ga.graph(directed=False)
@@ -154,7 +155,24 @@ a.state = "frontier"           # color: default/active/visited/frontier/done
 DAGs get layered layout; cyclic graphs get force-directed (deterministic —
 same input, same picture). State changes on the same line of a loop body merge
 into one **parallel** beat: a BFS frontier lights up all at once, no
-annotations needed.
+annotations needed. Pass `title=` to caption the graph on the canvas; because
+each `ga.graph(...)` is its own laid-out structure, making two of them renders
+two separate titled graphs — a forward pass and a backward pass, say
+(`examples/rnn_bptt.py`).
+
+```python
+fwd = ga.graph(directed=True, title="Forward")
+bwd = ga.graph(directed=True, title="Backward")
+
+@ga.animate(show=False)
+def two_graphs():
+    x, h = fwd.add_node("x"), fwd.add_node("h")
+    fwd.add_edge(x, h, weight="W")           # built into the Forward graph
+    dh, dx = bwd.add_node("dh"), bwd.add_node("dx")
+    bwd.add_edge(dh, dx, weight="Wᵀ")        # a second, separately-titled graph
+
+two_graphs()
+```
 
 ### `ga.matrix(rows)`
 
@@ -191,6 +209,31 @@ The field named by `value=` animates label changes. Anything else
 Iterators work: a generator `__iter__` defined in your file animates step by
 step, appears in the call stack panel, and its locals get badges.
 
+Pass `graph=True` to lay a web of these nodes out like `ga.graph` (layered DAG
+or force-directed) instead of a chain: every node-valued field — a single node
+*or* a list/set of them — becomes a clean graph edge, exactly what a
+computation graph needs. `graph="forward"` does the same into a *named*, titled
+graph, so instances can be split across, say, a forward and a backward graph
+(`examples/expr_graph.py`).
+
+```python
+@ga.node(value="label", shape="circle", graph=True)
+class Value:                                   # a micrograd-style scalar
+    def __init__(self, data, label="", children=()):
+        self.data = data
+        self.label = label or f"{data:.1f}"
+        self.children = list(children)         # node fields -> graph edges
+    def __add__(self, o): return Value(self.data + o.data, "+", (self, o))
+    def __mul__(self, o): return Value(self.data * o.data, "×", (self, o))
+
+@ga.animate(show=False)
+def expr():
+    a, b, c = Value(2, "a"), Value(-3, "b"), Value(10, "c")
+    return a * b + c        # the result's `children` wire up a DAG, not a chain
+
+expr()
+```
+
 ```python
 @ga.container
 class Queue:
@@ -214,14 +257,56 @@ truly unknown names still raise `AttributeError`, so typos stay loud.
 
 ## 4. The HTML player
 
-One file, fully offline, shareable. Controls: play/pause (`Space`), step
-forward/back (`→` / `←`), `Home`/`End`, a scrubber you can drag to any step,
-and a speed menu (0.25×–4×, remembered between sessions). The header chip
-shows the current source line. With `debug=True` the right panel shows live
-variables — `→ name` (amber) are node references, `▸ name` (blue) are array
-indices — and the call stack, with the active frame highlighted. Variables
-disappear when their function returns. Every recording ends on one extra beat
+One file, fully offline, shareable. The canvas sits in the middle; with
+`debug=True` a **source** and a **this step** panel appear on the left and a
+**state** panel on the right.
+
+**Canvas.** Nodes appear, arrows flip, cells recolor. **Drag any node** to move
+it — its edges follow and stay attached, and a dragged node holds its spot as
+later steps re-flow everything else (handy when a dense graph overlaps itself).
+Double-click a node to send it back to its computed position, or press `r` to
+release them all. Scroll to zoom, drag the background to pan, double-click empty
+space (or `f`) to fit. `ga.graph(title=…)` / `@ga.node(graph="name")`
+structures show their title above them.
+
+**Source (left, top).** The function's source with the executing line
+highlighted; it auto-scrolls to follow execution inside its own scroll box.
+
+**This step (left, bottom).** A separate panel — so the source scrolling never
+moves it — listing what the current beat did: edges set, value/state changes,
+comparisons and their outcome, loop/call/return markers, and any note.
+
+**State (right).** For the current step: **variables** (`→ name`, amber, are
+node references), **iterators** (loop indices like `i`/`t`), **node states**
+(every node currently active/visited/frontier/done), and the **call stack** with
+the active frame highlighted. Values vanish when their function returns.
+
+**Controls.** Play/pause (`Space`), step forward/back (`→` / `←`), `Home`/`End`,
+a scrubber, and a speed menu (0.25×–4×, remembered between sessions). The header
+chip shows the current source line. Every recording ends on one extra beat
 showing the final state.
+
+### Captions: `ga.note()`
+
+`ga.note("forward pass")` drops a caption onto the canvas at that point in your
+code. It stays until the next note (`ga.note(None)` clears it) and is a no-op
+outside a recording, so it never disturbs the plain algorithm — use it to narrate
+phases. Notes also show in the *this step* feed. A note is not a structure: it has
+no nodes or edges and doesn't affect layout.
+
+```python
+@ga.animate(debug=True, show=False)
+def search(a, x):
+    ga.note("scanning left to right")
+    for i in range(len(a)):
+        if a[i] == x:
+            ga.note(f"found {x} at index {i}")
+            return i
+    ga.note(None)                              # clear the caption
+    return -1
+
+search(ga.array([4, 8, 15, 16, 23]), 15)
+```
 
 ## 5. Tier 2: manual control
 
@@ -283,4 +368,6 @@ The `examples/` folder is the feature tour — each file is a dozen lines:
 `reverse_iterative`, `bst`, `bfs` (parallel frontier), `dedup` (orphans dim),
 `floyd` (cycle + badges meeting), `flood_fill` (matrix), `dijkstra` (weights),
 `quicksort`, `edit_distance` (DP), `custom_node` (`@ga.node`, LeetCode 138),
-`queue` (`@ga.container`).
+`queue` (`@ga.container`), `expr_graph` (`@ga.node(graph=…)` computation graph
+with `ga.note` captions), `rnn_bptt` (two titled graphs — forward activations and
+backward gradients — Karpathy's min-char-RNN with BPTT).

@@ -30,11 +30,11 @@ from .structures.matrix import Matrix
 from .structures.tracked import Tracked
 from .structures.tree import Tree, TreeNode
 
-__version__ = "1.1.0"
+__version__ = "2.0.0"
 __all__ = [
     "animate", "record", "array", "matrix", "linked_list", "tree", "graph",
-    "node", "container", "index", "GranimError", "ListNode", "TreeNode",
-    "GraphNode",
+    "node", "container", "index", "note", "GranimError", "ListNode",
+    "TreeNode", "GraphNode",
 ]
 
 array = Array
@@ -44,6 +44,15 @@ tree = Tree
 graph = Graph
 index = Index
 record = Recorder
+
+
+def note(text=None) -> None:
+    """Drop an explanatory caption onto the canvas at this point in the run.
+    Persists across steps until the next note; pass None or "" to clear it.
+    A no-op outside a recording, so it never disturbs the plain algorithm."""
+    rec = active()
+    if rec is not None:
+        rec.emit("note", {"text": str(text) if text else None})
 
 
 def animate(fn=None, *, debug=False, theme="dark", out=None, show=None,
@@ -65,6 +74,7 @@ def animate(fn=None, *, debug=False, theme="dark", out=None, show=None,
         rec = Recorder(debug=debug, theme=theme, title=title or fn.__name__,
                        speed=speed, owner=wrapper)
         rec.src_lines = linecache.getlines(fn.__code__.co_filename)
+        rec.func_first_line = fn.__code__.co_firstlineno
         from .structures.base import is_node
         rec.ext_roots = [a._id for a in (*args, *kwargs.values()) if is_node(a)]
         result, err = None, None

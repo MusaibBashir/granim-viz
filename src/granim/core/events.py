@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 KINDS = frozenset({
     "node_add", "node_remove", "edge_set", "read", "compare",
-    "value_set", "state_set", "var_set",
+    "value_set", "state_set", "var_set", "note",
 })
 
 # Kinds that trigger layout keyframes. edge_flip is assigned by the compiler.

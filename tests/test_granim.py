@@ -417,6 +417,47 @@ def test_node_decorator_instruments_user_class():
     assert head.val == 1 and head.next.val == 99 and head.random is head.next
 
 
+def test_node_graph_mode_groups_into_graph():
+    @ga.node(value="v", graph=True)
+    class V:
+        def __init__(self, v, kids=()):
+            self.v = v
+            self.kids = list(kids)  # collection of nodes -> graph edges
+
+    def build():
+        a, b = V(1), V(2)
+        return V(3, (a, b))
+
+    tl, _ = compile_of(build)
+    graphs = [sid for sid, s in tl["structs"].items() if s["type"] == "graph"]
+    assert len(graphs) == 1  # one implicit container for the class
+    gid = graphs[0]
+    members = [nid for nid, n in tl["nodes"].items() if n["struct"] == gid]
+    assert len(members) == 3  # every instance joined the graph
+    eslots = {op["slot"] for s in tl["steps"] for op in s["ops"]
+              if op["op"] == "edge_set"}
+    assert eslots == {"edge"}  # rendered as graph edges, not labelled slots
+    edges = [op for s in tl["steps"] for op in s["ops"] if op["op"] == "edge_set"]
+    assert len(edges) == 2  # parent -> each of its two children
+
+
+def test_note_event_appears_and_clears():
+    def f():
+        ll = ga.linked_list([1, 2])
+        ga.note("flip it")
+        ll.head.next = None
+        ga.note(None)
+        return ll
+
+    tl, _ = compile_of(f)
+    notes = [op for s in tl["steps"] for op in s["ops"] if op["op"] == "note"]
+    assert [n["text"] for n in notes] == ["flip it", None]
+
+
+def test_note_is_noop_unrecorded():
+    ga.note("nothing is recording")  # must not raise
+
+
 def test_node_decorator_unrecorded_contract():
     @ga.node(value="v")
     class P:
